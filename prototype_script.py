@@ -7,6 +7,67 @@ from sklearn.metrics import f1_score
 from sklearn.metrics import classification_report
 import time
 
+def calculate_majority_target(y, majority_class, reduction_level):
+    """Calculate how many majority samples we need to keep to hit a target dataset size.
+    
+    Args:
+        y: The target labels.
+        majority_class: The label of the majority class (to be undersampled).
+        reduction_level: Fraction of original dataset size as a decimal - the "target"
+            (e.g., 0.5 = 50%)
+            
+    Returns:
+        The number of majority samples to retain.
+    
+    Raises:
+        ValueError: If the reduction_level is so low that the target size is
+            smaller than the existing minority class count.
+    """
+    n_total = len(y)
+    n_minority = (y != majority_class).sum()
+    n_target = int(n_total * reduction_level)
+    n_majority_target = n_target - n_minority
+
+    if n_majority_target <= 0:
+        raise ValueError(
+            f"Reduction level {reduction_level} is so low that the target size is smaller than the existing minority class count."
+            f"\n  Minority classes: {n_minority}\n  Target size: {n_target}"
+        )
+    
+    return n_majority_target
+
+def random_undersample(x_transformed, y, majority_class, reduction_level, random_state):
+    """Randomly undersamples the majority class to hit a target dataset size.
+    
+    Args:
+        x_transformed: Input features as map
+        y: The target labels.
+        majority_class: The label of the majority class (to be undersampled).
+        reduction_level: Fraction of original dataset size as a decimal - the "target"
+            (e.g., 0.5 = 50%)
+        random_state: Seed for the random number generator.
+        
+    Returns:
+        A tuple containing (x_out, y_out, actual_reduction).
+        actual_reduction is the final size as a fraction of the original dataset.
+    """
+    minority_mask = (y != majority_class)
+    x_min = x_transformed[minority_mask]
+    y_min = y[minority_mask]
+    x_maj = x_transformed[~minority_mask]
+    y_maj = y[~minority_mask]
+
+    n_majority_target = calculate_majority_target(y, majority_class, reduction_level)
+
+    seed = np.random.default_rng(random_state) # FIXME really better to pass seed or generate in every sampling function???
+    majority_indices = seed.choice(len(y_maj), size=n_majority_target, replace=False)
+
+    x_out = np.concatenate([x_min, x_maj[majority_indices]])
+    y_out = pd.concat([y_min, y_maj.iloc[majority_indices]])
+    actual_reduction = len(y_out) / len(y)
+
+    return x_out, y_out, actual_reduction
+
 # column names from the kdd docs
 columns = [
 'duration', 'protocol_type', 'service', 'flag', 'src_bytes', 'dst_bytes', 'land', 'wrong_fragment', 'urgent', 'hot', 'num_failed_logins', 'logged_in', 'num_compromised', 'root_shell', 'su_attempted', 'num_root', 'num_file_creations', 'num_shells', 'num_access_files', 'num_outbound_cmds', 'is_host_login', 'is_guest_login', 'count', 'srv_count', 'serror_rate', 'srv_serror_rate', 'rerror_rate', 'srv_rerror_rate', 'same_srv_rate', 'diff_srv_rate', 'srv_diff_host_rate', 'dst_host_count', 'dst_host_srv_count', 'dst_host_same_srv_rate', 'dst_host_diff_srv_rate', 'dst_host_same_src_port_rate', 'dst_host_srv_diff_host_rate', 'dst_host_serror_rate', 'dst_host_srv_serror_rate', 'dst_host_rerror_rate', 'dst_host_srv_rerror_rate',
@@ -43,8 +104,7 @@ label_map = {
 y_train = y_train.map(label_map)
 y_test = y_test.map(label_map)
 
-# pre-process (ColumnTransformer)
-# Identify column types (for NSL-KDD, they are object dtype)
+# pre-process
 cat_cols = x_train.select_dtypes(include=["object", "string"]).columns.tolist()
 num_cols = x_train.select_dtypes(include=[np.number]).columns.tolist()
 
@@ -65,55 +125,42 @@ print(f"Test data shape after preprocessing: {x_test_transformed.shape}")
 print("Unique labels in y_train:", y_train.unique())
 print("Count of 'normal' in y_train:", (y_train == 'Normal').sum())
 
-# train on full dataset (baseline)
-print("Training on full dataset!")
-start = time.time()
-rf_full = RandomForestClassifier(n_estimators=100, random_state=42)
-rf_full.fit(x_train_transformed, y_train)
-train_acc = rf_full.score(x_train_transformed, y_train)
-train_time_full = time.time() - start
-
-y_pred_full = rf_full.predict(x_test_transformed)
-print(classification_report(y_test, y_pred_full, zero_division=0))
-f1_macro_full = f1_score(y_test, y_pred_full, average="macro")
-print(f"Full data - Train time: {train_time_full:.2f}s, Macro F1: {f1_macro_full:.4f}")
-
-# random undersampling at 50% reduction
-print("\nApplying random undersampling (50% reduction)!")
-'''Create a random undersampler that reduced majority class to match minority size
-There has to be a better way to do this - we're currently culling a % of majority to take down overall set size'''
-
-# identify majority and minority classes (here, 'normal' is majority)
 majority_class = "Normal"
-minority_mask = (y_train != majority_class)
-x_minority = x_train_transformed[minority_mask]
-y_minority = y_train[minority_mask]
+reduction_levels = [1.00, 0.75, 0.50, 0.25, 0.10] # as per methodology. skipping 25% and 10% for now as it leads to reducing majority class to smaller than the minority
+results = []
 
-x_majority = x_train_transformed[~minority_mask]
-y_majority = y_train[~minority_mask]
+for level in reduction_levels:  # TODO in real experiment, this may make it too difficult to utilise more than one machine
+    if level == 1.00:
+        print("Training on full dataset!")
+        x_sampled, y_sampled = x_train_transformed, y_train
+        actual_size = level
+    else:
+        print(f"Applying random undersampling (target: {level * 100}% reduction)!")
+        x_sampled, y_sampled, actual_size = random_undersample(x_train_transformed, y_train, majority_class, level, random_state=42) # FIXME THIS DOES NOT BELONG HERE. IT'S A GLOBAL SEED CONSISTENT ACROSS THE ENTIRE PROJECT.
+        print(f"  Target: {level * 100}%, Actual: {actual_size * 100}%, Literal size: {len(y_sampled)}")
 
-# Sample 50% (or whatever it turns out to be) of majority
-np.random.default_rng(42)
-indices = np.random.choice(len(x_majority), size=int(0.1 * len(x_majority)), replace=False)
-x_majority_sampled = x_majority[indices]
-y_majority_sampled = y_majority.iloc[indices]
+    start = time.time()
+    rf = RandomForestClassifier(n_estimators=100, random_state=42)
+    rf.fit(x_sampled, y_sampled)
+    train_time = time.time() - start
 
-# Combine
-x_train_sampled = np.concatenate([x_minority, x_majority_sampled])
-y_train_sampled = pd.concat([y_minority, y_majority_sampled])
+    # might as well test inference timing
+    # TODO are there more accurate libraries for this?
+    start = time.time()
+    y_pred = rf.predict(x_test_transformed)
+    inference_time = time.time() - start
 
-print(f"Original size: {len(x_train)}, after sampling: {len(x_train_sampled)} (reduction {1 - len(x_train_sampled)/len(x_train):.1%})")
+    f1 = f1_score(y_test, y_pred, average="macro", zero_division="warn")  #better for debugging than silent fails at this stage
+    results.append({
+        "reduction_level": level,
+        "actual_size": actual_size,
+        "dataset_size": len(y_sampled),
+        "train_time": train_time,
+        "inference_time": inference_time,
+        "macro_f1": f1
+    })
+    print(f"  Train = {train_time:.2f}s, Infer = {inference_time:.4f}s, Macro F1 = {f1:.4f}")
 
-start = time.time()
-rf_sampled = RandomForestClassifier(n_estimators=100, random_state=42)
-rf_sampled.fit(x_train_sampled, y_train_sampled)
-train_time_sampled = time.time() - start
-
-y_pred_sampled = rf_sampled.predict(x_test_transformed)
-f1_macro_sampled = f1_score(y_test, y_pred_sampled, average="macro")
-print(f"Sampled data - Train time: {train_time_sampled:.2f}s, Macro F1: {f1_macro_sampled:.4f}")
-
-# quick comparison
-print("\nComparison:")
-print(f"  Full data:      Time = {train_time_full:.2f}s, Macro F1 = {f1_macro_full:.4f}")
-print(f"  Undersampled:   Time = {train_time_sampled:.2f}s, Macro F1 = {f1_macro_sampled:.4f}")
+results_df = pd.DataFrame(results)
+print("\nResults:")
+print(results_df.to_string(index=False))
