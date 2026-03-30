@@ -1,11 +1,14 @@
 import pandas as pd
 import numpy as np
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, LabelEncoder
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression, SGDClassifier
+from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import f1_score
-from sklearn.metrics import classification_report
 import time
+from xgboost import XGBClassifier
+import argparse
 
 def calculate_majority_target(y, majority_class, reduction_level):
     """Calculate how many majority samples we need to keep to hit a target dataset size.
@@ -17,22 +20,15 @@ def calculate_majority_target(y, majority_class, reduction_level):
             (e.g., 0.5 = 50%)
             
     Returns:
-        The number of majority samples to retain.
-    
-    Raises:
-        ValueError: If the reduction_level is so low that the target size is
-            smaller than the existing minority class count.
+        The number of majority samples to retain, or None if minority ALONE is bigger than the target size.
     """
     n_total = len(y)
     n_minority = (y != majority_class).sum()
     n_target = int(n_total * reduction_level)
     n_majority_target = n_target - n_minority
 
-    if n_majority_target <= 0:
-        raise ValueError(
-            f"Reduction level {reduction_level} is so low that the target size is smaller than the existing minority class count."
-            f"\n  Minority classes: {n_minority}\n  Target size: {n_target}"
-        )
+    if n_majority_target < 0:
+        return None # it's impossible!
     
     return n_majority_target
 
@@ -50,6 +46,7 @@ def random_undersample(x_transformed, y, majority_class, reduction_level, random
     Returns:
         A tuple containing (x_out, y_out, actual_reduction).
         actual_reduction is the final size as a fraction of the original dataset.
+        Returns (None, None, None) if the reduction level is impossible.
     """
     minority_mask = (y != majority_class)
     x_min = x_transformed[minority_mask]
@@ -59,6 +56,9 @@ def random_undersample(x_transformed, y, majority_class, reduction_level, random
 
     n_majority_target = calculate_majority_target(y, majority_class, reduction_level)
 
+    if n_majority_target == None:
+        return (None, None, None)
+
     seed = np.random.default_rng(random_state) # FIXME really better to pass seed or generate in every sampling function???
     majority_indices = seed.choice(len(y_maj), size=n_majority_target, replace=False)
 
@@ -67,6 +67,14 @@ def random_undersample(x_transformed, y, majority_class, reduction_level, random
     actual_reduction = len(y_out) / len(y)
 
     return x_out, y_out, actual_reduction
+
+# i've always wanted to do this in python. handle CLI:
+parser = argparse.ArgumentParser()
+parser.add_argument("--classifier", "-c",
+                    choices=["RandomForest", "LogisticRegression", "XGBoost", "SGD", "MLP"],
+                    nargs="+",
+                    default=None)
+args = parser.parse_args()
 
 # column names from the kdd docs
 columns = [
@@ -125,41 +133,91 @@ print(f"Test data shape after preprocessing: {x_test_transformed.shape}")
 print("Unique labels in y_train:", y_train.unique())
 print("Count of 'normal' in y_train:", (y_train == 'Normal').sum())
 
+# define classifiers
+# note that class_weight="balanced" is NOT picked as a parameter.
+# weighting & undersampling both tackle imbalance so to keep a clean comparison, we leave it out for this experiment
+classifiers_list = [
+    ("RandomForest", RandomForestClassifier(n_estimators=100, random_state=42)),
+    ("LogisticRegression", LogisticRegression(max_iter=1000, random_state=42)),
+    ("XGBoost", XGBClassifier(random_state=42)),
+    ("SGD", SGDClassifier(random_state=42)),
+    ("MLP", MLPClassifier(random_state=42))
+]
+
+if args.classifier:
+    classifiers = []
+    for name, classifier in classifiers_list:
+        if name in args.classifier:
+            classifiers.append((name, classifier))
+else:
+    classifiers = classifiers_list
+
+
 majority_class = "Normal"
 reduction_levels = [1.00, 0.75, 0.50, 0.25, 0.10] # as per methodology. skipping 25% and 10% for now as it leads to reducing majority class to smaller than the minority
 results = []
 
-for level in reduction_levels:  # TODO in real experiment, this may make it too difficult to utilise more than one machine
-    if level == 1.00:
-        print("Training on full dataset!")
-        x_sampled, y_sampled = x_train_transformed, y_train
-        actual_size = level
-    else:
-        print(f"Applying random undersampling (target: {level * 100}% reduction)!")
-        x_sampled, y_sampled, actual_size = random_undersample(x_train_transformed, y_train, majority_class, level, random_state=42) # FIXME THIS DOES NOT BELONG HERE. IT'S A GLOBAL SEED CONSISTENT ACROSS THE ENTIRE PROJECT.
-        print(f"  Target: {level * 100}%, Actual: {actual_size * 100}%, Literal size: {len(y_sampled)}")
+for classifier_name, classifier in classifiers:
+    print(f"\nCLASSIFIER: {classifier_name}")
 
-    start = time.time()
-    rf = RandomForestClassifier(n_estimators=100, random_state=42)
-    rf.fit(x_sampled, y_sampled)
-    train_time = time.time() - start
+    for level in reduction_levels:  # TODO in real experiment, this may make it too difficult to utilise more than one machine
+        if level == 1.00:
+            print("  Training on full dataset!")
+            x_sampled, y_sampled = x_train_transformed, y_train
+            actual_size = level
+        else:
+            print(f"  Applying random undersampling (target: {level * 100}% reduction)!")
+            x_sampled, y_sampled, actual_size = random_undersample(x_train_transformed, y_train, majority_class, level, random_state=42) # FIXME THIS DOES NOT BELONG HERE. IT'S A GLOBAL SEED CONSISTENT ACROSS THE ENTIRE PROJECT.
 
-    # might as well test inference timing
-    # TODO are there more accurate libraries for this?
-    start = time.time()
-    y_pred = rf.predict(x_test_transformed)
-    inference_time = time.time() - start
+            if x_sampled is None:   # TODO spidey senses are tingling with this level of indentation. some would lament the use of "continue", too!
+                print("  SKIPPING REDUCTION LEVEL. Minority classes alone are bigger than the desired set size.")
+                results.append({
+                    "classifier": classifier_name,
+                    "reduction_level": level,
+                    "actual_size": None,
+                    "dataset_size": None,
+                    "train_time": None,
+                    "inference_time": None,
+                    "macro_f1": None
+                })
+                continue
 
-    f1 = f1_score(y_test, y_pred, average="macro", zero_division="warn")  #better for debugging than silent fails at this stage
-    results.append({
-        "reduction_level": level,
-        "actual_size": actual_size,
-        "dataset_size": len(y_sampled),
-        "train_time": train_time,
-        "inference_time": inference_time,
-        "macro_f1": f1
-    })
-    print(f"  Train = {train_time:.2f}s, Infer = {inference_time:.4f}s, Macro F1 = {f1:.4f}")
+            print(f"    Target: {level * 100}%, Actual: {actual_size * 100}%, Literal size: {len(y_sampled)}")
+
+        # XGBoost breaks with string labels. thus, numeric encoding:
+        if classifier_name == "XGBoost":
+            label_encoder = LabelEncoder().fit(y_train)
+            y_test_encoded = label_encoder.transform(y_test)
+            y_fit = label_encoder.transform(y_sampled)
+            y_eval = y_test_encoded
+        else:
+            y_fit = y_sampled
+            y_eval = y_test
+
+        start = time.time()
+        classifier.fit(x_sampled, y_fit) # duck typing is fantastic
+        train_time = time.time() - start
+
+        # might as well test inference timing
+        # TODO are there more accurate libraries for this?
+        start = time.time()
+        y_pred = classifier.predict(x_test_transformed)
+
+        if classifier_name == "XGBoost":
+            y_pred = label_encoder.inverse_transform(y_pred) # TODO icl this feels stupid to have to do
+        inference_time = time.time() - start
+
+        f1 = f1_score(y_test, y_pred, average="macro", zero_division="warn")  #better for debugging than silent fails at this stage
+        results.append({
+            "classifier": classifier_name,
+            "reduction_level": level,
+            "actual_size": actual_size,
+            "dataset_size": len(y_sampled),
+            "train_time": train_time,
+            "inference_time": inference_time,
+            "macro_f1": f1
+        })
+        print(f"  Train = {train_time:.2f}s, Infer = {inference_time:.4f}s, Macro F1 = {f1:.4f}")
 
 results_df = pd.DataFrame(results)
 print("\nResults:")
