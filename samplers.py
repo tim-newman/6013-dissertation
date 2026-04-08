@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+from imblearn.under_sampling import ClusterCentroids, NearMiss
 
 def calculate_majority_target(y, majority_class, reduction_level):
     """Calculate how many majority samples we need to keep to hit a target dataset size.
@@ -48,7 +49,7 @@ def sample_random(x_transformed, y, majority_class, reduction_level, random_stat
     n_majority_target = calculate_majority_target(y, majority_class, reduction_level)
 
     if n_majority_target == None:
-        return (None, None, None)
+        return None, None, None
 
     seed = np.random.default_rng(random_state) # FIXME really better to pass seed or generate in every sampling function???
     majority_indices = seed.choice(len(y_maj), size=n_majority_target, replace=False)
@@ -59,11 +60,33 @@ def sample_random(x_transformed, y, majority_class, reduction_level, random_stat
 
     return x_out, y_out, actual_reduction
 
-def sample_cluster_centroids(x, y, majority_class, reduction_level, random_state):
+def sample_cluster_centroids(x_train_transformed, y_train_labels, majority_class, reduction_level, random_state):
     """imbalanced-learn ClusterCentroids"""
+    n_majority_target = calculate_majority_target(y_train_labels, majority_class, reduction_level)
+    if n_majority_target is None:
+        return None, None, None
+    
+    undersampler = ClusterCentroids(sampling_strategy={majority_class: n_majority_target}, random_state=random_state)
+    x_undersampled, y_undersampled_array = undersampler.fit_resample(x_train_transformed, y_train_labels)
 
-def sample_nearmiss(x, y, majority_class, reduction_level, random_state):
+    y_undersampled = pd.Series(y_undersampled_array)
+    actual_reduction = len(y_undersampled) / len(y_train_labels)
+
+    return x_undersampled, y_undersampled, actual_reduction
+
+def sample_nearmiss(x_train_transformed, y_train_labels, majority_class, reduction_level, random_state):
     """imbalanced-learn NearMiss-1"""
+    n_majority_target = calculate_majority_target(y_train_labels, majority_class, reduction_level)
+    if n_majority_target is None:
+        return None, None, None
+    
+    undersampler = NearMiss(sampling_strategy={majority_class: n_majority_target})
+    x_undersampled, y_undersampled_array = undersampler.fit_resample(x_train_transformed, y_train_labels)
+
+    y_undersampled = pd.Series(y_undersampled_array)
+    actual_reduction = len(y_undersampled) / len(y_train_labels)
+
+    return x_undersampled, y_undersampled, actual_reduction
 
 # define samplers
 SAMPLER_LIST = [
