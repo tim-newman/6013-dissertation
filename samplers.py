@@ -80,7 +80,7 @@ def sample_nearmiss(x_train_transformed, y_train_labels, majority_class, reducti
     if n_majority_target is None:
         return None, None, None
     
-    undersampler = NearMiss(sampling_strategy={majority_class: n_majority_target})
+    undersampler = NearMiss(sampling_strategy={majority_class: n_majority_target}, n_jobs=-1) # TODO does this allow for a fair comparison?
     x_undersampled, y_undersampled_array = undersampler.fit_resample(x_train_transformed, y_train_labels)
 
     y_undersampled = pd.Series(y_undersampled_array)

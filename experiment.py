@@ -1,3 +1,6 @@
+from sklearnex import patch_sklearn
+patch_sklearn()
+
 import argparse
 import time
 import pandas as pd
@@ -59,33 +62,38 @@ results = []
 for sampler_name, sampler_function in samplers:
     print(f"\nSAMPLER: {sampler_name}")
 
-    for classifier_name, classifier in classifiers:
-        print(f"\nCLASSIFIER: {classifier_name}")
+    for reduction_level in reduction_levels:
+        #sample only once
+        if reduction_level == 1.00:
+            print(f"Training on full dataset ({args.dataset})!\n")
+            x_train_sampled, y_train_sampled = x_train_transformed, y_train_labels
+            actual_reduction = reduction_level
+            sample_time = 0
+        else:
+            print(f"APPLYING {sampler_name} (target: {reduction_level * 100}% reduction)!\n")
+            # TODO JUST FOR TESTING:
+            start = time.time()
+            x_train_sampled, y_train_sampled, actual_reduction = sampler_function(x_train_transformed, y_train_labels, majority_class, reduction_level, RANDOM_STATE)
+            sample_time = time.time() - start
 
-        for reduction_level in reduction_levels:  # TODO in real experiment, this may make it too difficult to utilise more than one machine
-            if reduction_level == 1.00:
-                print(f"  Training on full dataset ({args.dataset})!")
-                x_train_sampled, y_train_sampled = x_train_transformed, y_train_labels
-                actual_reduction = reduction_level
-            else:
-                print(f"  Applying {sampler_name} (target: {reduction_level * 100}% reduction)!")
-                x_train_sampled, y_train_sampled, actual_reduction = sampler_function(x_train_transformed, y_train_labels, majority_class, reduction_level, RANDOM_STATE)
+            if x_train_sampled is None:   # TODO spidey senses are tingling with this level of indentation. some would lament the use of "continue", too!
+                print("SKIPPING REDUCTION LEVEL. Minority classes alone are bigger than the desired set size.")
+                results.append({
+                    "sampler": sampler_name,
+                    "reduction_level": reduction_level,
+                    "classifier": classifier_name,
+                    "actual_reduction": None,
+                    "dataset_size": None,
+                    "train_time": None,
+                    "inference_time": None,
+                    "macro_f1": None
+                })
+                continue
 
-                if x_train_sampled is None:   # TODO spidey senses are tingling with this level of indentation. some would lament the use of "continue", too!
-                    print("  SKIPPING REDUCTION LEVEL. Minority classes alone are bigger than the desired set size.")
-                    results.append({
-                        "sampler": sampler_name,
-                        "classifier": classifier_name,
-                        "reduction_level": reduction_level,
-                        "actual_reduction": None,
-                        "dataset_size": None,
-                        "train_time": None,
-                        "inference_time": None,
-                        "macro_f1": None
-                    })
-                    continue
-
-                print(f"    Target: {reduction_level * 100}%, Actual: {actual_reduction * 100}%, Literal size: {len(y_train_sampled)}")
+            print(f"    Target: {reduction_level * 100}%, Actual: {actual_reduction * 100}%, Literal size: {len(y_train_sampled)}")
+        
+        for classifier_name, classifier in classifiers:
+            print(f"Classifier: {classifier_name}")
 
             # XGBoost breaks with string labels. thus, numeric encoding:
             if classifier_name == "XGBoost":
@@ -110,15 +118,15 @@ for sampler_name, sampler_function in samplers:
             f1 = f1_score(y_test_labels, y_test_predictions, average="macro", zero_division="warn")  #better for debugging than silent fails at this stage
             results.append({
                 "sampler": sampler_name,
-                "classifier": classifier_name,
                 "reduction_level": reduction_level,
+                "classifier": classifier_name,
                 "actual_reduction": actual_reduction,
                 "dataset_size": len(y_train_sampled),
                 "train_time": train_time,
                 "inference_time": inference_time,
                 "macro_f1": f1
             })
-            print(f"  Train = {train_time:.2f}s, Infer = {inference_time:.4f}s, Macro F1 = {f1:.4f}")
+            print(f"  Sample = {sample_time:.2f}s, Train = {train_time:.2f}s, Infer = {inference_time:.4f}s, Macro F1 = {f1:.4f}")
 
     results_df = pd.DataFrame(results)
     print("\nResults:")

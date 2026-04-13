@@ -55,8 +55,8 @@ def load():
             ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), cat_cols)
         ]
     )
-    x_train_transformed = preprocessor.fit_transform(x_train_raw)
-    x_test_transformed = preprocessor.transform(x_test_raw)
+    x_train_transformed = preprocessor.fit_transform(x_train_raw).astype(np.float32)
+    x_test_transformed = preprocessor.transform(x_test_raw).astype(np.float32)
  
     # fitting LabelEncoder here for XGBoost
     label_encoder = LabelEncoder().fit(y_train_labels)
