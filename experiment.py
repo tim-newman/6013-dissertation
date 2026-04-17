@@ -70,10 +70,10 @@ for sampler_name, sampler_function in samplers:
             actual_reduction = reduction_level
             sample_time = 0
         else:
-            print(f"APPLYING {sampler_name} (target: {reduction_level * 100}% reduction)!\n")
+            print(f"\nAPPLYING {sampler_name} (target: {reduction_level * 100}% reduction)!")
             # TODO JUST FOR TESTING:
             start = time.time()
-            x_train_sampled, y_train_sampled, actual_reduction = sampler_function(x_train_transformed, y_train_labels, majority_class, reduction_level, RANDOM_STATE)
+            x_train_sampled, y_train_sampled, actual_reduction = sampler_function(x_train_transformed, y_train_labels, reduction_level, RANDOM_STATE)
             sample_time = time.time() - start
 
             if x_train_sampled is None:   # TODO spidey senses are tingling with this level of indentation. some would lament the use of "continue", too!

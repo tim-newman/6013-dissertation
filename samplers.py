@@ -1,30 +1,85 @@
 import pandas as pd
 import numpy as np
-from imblearn.under_sampling import ClusterCentroids, NearMiss
+from imblearn.under_sampling import ClusterCentroids, NearMiss, RandomUnderSampler
 
-def calculate_majority_target(y, majority_class, reduction_level):
-    """Calculate how many majority samples we need to keep to hit a target dataset size.
+def calculate_undersampling_targets(y, reduction_level):
+    """Calculate how many per-class samples we need to keep to hit a target dataset size.
+
+    This approach attempts to cap the top 'k' classes at a single common value 'c', and leave every other class alone.
     
+    'Stream of consciousness' solution approach:
+    - Calculate target dataset size 't': With reduction level 'r' (as a fraction) and total dataset samples 's', t=rs.
+    - Iterate over k values, starting at 1:
+        - Calculate 'c': (t - sum(untouched_classes_samples)) / k
+        - Check c: 
+            In cases where c is small, like needing heavy reduction with only k=1,
+            the untouched clasess end up bigger than the capped ones. This wouldn't make sense.
+            Thus, check c>=size[k].
+    - As soon as we find a valid c value, we can return.
+
     Args:
         y: The target labels.
-        majority_class: The label of the majority class (to be undersampled).
-        reduction_level: Fraction of original dataset size as a decimal - the "target"
-            (e.g., 0.5 = 50%)
-            
+        reduction_level: Fraction of original dataset size as a decimal.
+            (e.g., 0.7 = reduce dataset to 70% of its size)
+
     Returns:
-        The number of majority samples to retain, or None if minority ALONE is bigger than the target size.
+        A dictionary mapping capped classes to the calculated c value.
+        None if no valid k is possible.
     """
     n_total = len(y)
-    n_minority = (y != majority_class).sum()
-    n_target = int(n_total * reduction_level)
-    n_majority_target = n_target - n_minority
+    t = int(reduction_level * n_total)
+    unique_labels, label_counts = np.unique(y, return_counts=True)
+    counts = {}
+    for label, count in zip(unique_labels, label_counts):
+        counts[label] = int(count)
+    n_classes = len(counts)
 
-    if n_majority_target < 0:
-        return None # it's impossible!
+    # could be impossible from the outset
+    if t < n_classes:
+        return None
+
+    sorted_classes = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+
+    labels = []
+    sizes = []
+    for label, size in sorted_classes:
+        labels.append(label)
+        sizes.append(size)
+
+    for k in range(1, n_classes + 1):
+        # sum sizes we AREN'T capping
+        remaining_sum = 0
+        for size in sizes[k:]:
+            remaining_sum += size
+
+        samples_left_to_distribute = t - remaining_sum
+
+        if samples_left_to_distribute <= 0:
+            continue
+            
+        c = samples_left_to_distribute / k
+
+        size_of_kth_class = sizes[k-1]
+
+        if k < n_classes:
+            size_of_next_class = sizes[k]
+        else:
+            size_of_next_class = 0
+        
+        # c check
+        c_is_valid = size_of_next_class <= c <= size_of_kth_class
+
+        if c_is_valid:
+            cap = int(c)
+            result = {}
+            for i in range(k):
+                result[labels[i]] = cap
+            return result
     
-    return n_majority_target
+    return None # no k possible
 
-def sample_random(x_transformed, y, majority_class, reduction_level, random_state):
+    
+def sample_random(x_transformed, y, reduction_level, random_state): # TODO lot of repetition in the sampler functions that could be extracted
     """Randomly undersamples the majority class to hit a target dataset size.
     
     Args:
@@ -40,33 +95,29 @@ def sample_random(x_transformed, y, majority_class, reduction_level, random_stat
         actual_reduction is the final size as a fraction of the original dataset.
         Returns (None, None, None) if the reduction level is impossible.
     """
-    minority_mask = (y != majority_class)
-    x_min = x_transformed[minority_mask]
-    y_min = y[minority_mask]
-    x_maj = x_transformed[~minority_mask]
-    y_maj = y[~minority_mask]
-
-    n_majority_target = calculate_majority_target(y, majority_class, reduction_level)
-
-    if n_majority_target == None:
+    targets = calculate_undersampling_targets(y, reduction_level)
+    if targets is None:
         return None, None, None
 
-    seed = np.random.default_rng(random_state) # FIXME really better to pass seed or generate in every sampling function???
-    majority_indices = seed.choice(len(y_maj), size=n_majority_target, replace=False)
+    undersampler = RandomUnderSampler(
+        sampling_strategy=targets,
+        random_state=random_state,
+    )
+    x_undersampled, y_undersampled_array = undersampler.fit_resample(x_transformed, y)
 
-    x_out = np.concatenate([x_min, x_maj[majority_indices]])
-    y_out = pd.concat([y_min, y_maj.iloc[majority_indices]])
-    actual_reduction = len(y_out) / len(y)
+    y_undersampled = pd.Series(y_undersampled_array)
+    actual_reduction = len(y_undersampled) / len(y)
 
-    return x_out, y_out, actual_reduction
+    return x_undersampled, y_undersampled, actual_reduction
 
-def sample_cluster_centroids(x_train_transformed, y_train_labels, majority_class, reduction_level, random_state):
+
+def sample_cluster_centroids(x_train_transformed, y_train_labels, reduction_level, random_state):
     """imbalanced-learn ClusterCentroids"""
-    n_majority_target = calculate_majority_target(y_train_labels, majority_class, reduction_level)
-    if n_majority_target is None:
+    targets = calculate_undersampling_targets(y_train_labels, reduction_level)
+    if targets is None:
         return None, None, None
-    
-    undersampler = ClusterCentroids(sampling_strategy={majority_class: n_majority_target}, random_state=random_state)
+
+    undersampler = ClusterCentroids(sampling_strategy=targets, random_state=random_state)
     x_undersampled, y_undersampled_array = undersampler.fit_resample(x_train_transformed, y_train_labels)
 
     y_undersampled = pd.Series(y_undersampled_array)
@@ -74,13 +125,14 @@ def sample_cluster_centroids(x_train_transformed, y_train_labels, majority_class
 
     return x_undersampled, y_undersampled, actual_reduction
 
-def sample_nearmiss(x_train_transformed, y_train_labels, majority_class, reduction_level, random_state):
+
+def sample_nearmiss(x_train_transformed, y_train_labels, reduction_level, random_state):
     """imbalanced-learn NearMiss-1"""
-    n_majority_target = calculate_majority_target(y_train_labels, majority_class, reduction_level)
-    if n_majority_target is None:
+    targets = calculate_undersampling_targets(y_train_labels, reduction_level)
+    if targets is None:
         return None, None, None
-    
-    undersampler = NearMiss(sampling_strategy={majority_class: n_majority_target}, n_jobs=-1) # TODO does this allow for a fair comparison?
+
+    undersampler = NearMiss(sampling_strategy=targets, n_jobs=-1)  # TODO does this allow for a fair comparison?
     x_undersampled, y_undersampled_array = undersampler.fit_resample(x_train_transformed, y_train_labels)
 
     y_undersampled = pd.Series(y_undersampled_array)
