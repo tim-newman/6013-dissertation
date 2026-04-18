@@ -28,12 +28,10 @@ args = parser.parse_args()
 # pick dataset
 if args.dataset == "NSL-KDD":
     import preprocessing.nsl_kdd as dataset_module
-'''not implemented
 elif args.dataset == "CICIDS2017":
-    import preprocessing.cicids2017 as dataset_module'''
+    import preprocessing.cicids2017 as dataset_module
 
 (x_train_transformed, x_test_transformed, y_train_labels, y_test_labels, label_encoder) = dataset_module.load()
-majority_class = dataset_module.MAJORITY_CLASS
 
 # pick classifiers
 classifier_list = build_classifiers(RANDOM_STATE)
