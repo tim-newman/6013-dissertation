@@ -92,5 +92,5 @@ def convert(x):
         return x.tolist()
     print(f"Error on {x}")
 
-def dump_json(obj):
+def to_json(obj):
     return json.dumps(obj, default=convert)
