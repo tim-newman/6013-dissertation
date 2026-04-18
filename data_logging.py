@@ -54,28 +54,6 @@ def append_result(row, path):
         f.flush()           # push to OS buffer
         os.fsync(f.fileno())  # push OS buffer to actual disk
 
-def load_completed_runs(path):
-    """Look at an existing CSV and return the set of runs already done successfully.
-    Used to skip work we've already completed."""
-    if not Path(path).exists():
-        return set()
-
-    completed = set()
-    with open(path, "r", newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            if row["status"] != "ok":
-                continue   # don't skip failed or skipped runs. they should retry
-            key = (
-                row["dataset"],
-                row["sampler"],
-                float(row["reduction_level"]),
-                int(row["seed"]),
-                row["classifier"],
-            )
-            completed.add(key)
-    return completed
-
 def get_machine_id():
     return socket.gethostname()
 
