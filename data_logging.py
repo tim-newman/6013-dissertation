@@ -34,8 +34,7 @@ FIELDNAMES = [
     "confusion_matrix",
     "class_labels",
     # status
-    "status",  # "ok", "skipped_infeasible", "error"
-    "error_message",
+    "status",  # "ok", "impossible", "error"
 ]
 
 def append_result(row, path):
