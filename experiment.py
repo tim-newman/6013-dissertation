@@ -23,7 +23,7 @@ parser.add_argument("--sampler", "-s",
                     default=None)
 parser.add_argument("--dataset", "-d",
                     choices=["NSL-KDD", "CICIDS2017"],
-                    default="NSL-KDD")
+                    default="CICIDS2017")
 parser.add_argument("--reduction", "-r", type=float, nargs="+", default=None)
 parser.add_argument("--seed", type=int, nargs="+", default=None)
 parser.add_argument("--output", "-o", default=None)
