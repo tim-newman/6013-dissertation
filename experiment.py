@@ -39,7 +39,8 @@ if args.dataset == "NSL-KDD":
 elif args.dataset == "CICIDS2017":
     import preprocessing.cicids2017 as dataset_module
 
-(x_train_transformed, x_test_transformed, y_train_labels, y_test_labels, label_encoder) = dataset_module.load()
+#allow for split seeding
+raw_x, raw_y = dataset_module.load_raw()
 
 # pick classifiers
 classifier_list = build_classifiers(DEFAULT_SEEDS[0]) # TODO awkward artefact in need of refactor. don't actually want to build them right now
@@ -82,13 +83,14 @@ else:
 
 #----------Experiment----------
 results = []
-class_labels = sorted(set(y_train_labels) | set(y_test_labels))
+class_labels = sorted(raw_y.unique())
 
-for sampler_name, sampler_function in samplers:
-    print(f"\nSAMPLER: {sampler_name}")
+for seed in seeds:
+    (x_train_transformed, x_test_transformed, y_train_labels, y_test_labels, label_encoder) = dataset_module.split_and_preprocess(raw_x, raw_y, seed)
+    for sampler_name, sampler_function in samplers:
+        print(f"\nSAMPLER: {sampler_name}")
 
-    for reduction_level in reduction_levels:
-        for seed in seeds:
+        for reduction_level in reduction_levels:
             #sample only once (per sampler, reduction, seed)
             if reduction_level == 1.00:
                 print(f"Training on full dataset ({args.dataset})!\n")
