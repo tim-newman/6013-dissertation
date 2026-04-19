@@ -15,6 +15,6 @@ def build_classifiers(random_state):
     ("XGBoost", XGBClassifier(random_state=random_state, n_jobs=-1)),
     ("SGD", SGDClassifier(random_state=random_state, n_jobs=-1)),
     ("MLP", MLPClassifier(random_state=random_state,
-                          max_iter=500 #has been giving warnings
-                          ))
+                          max_iter=500, #has been giving warnings
+                          early_stopping=True))
 ]
