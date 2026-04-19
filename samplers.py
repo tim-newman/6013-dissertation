@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from imblearn.under_sampling import ClusterCentroids, NearMiss, RandomUnderSampler
-from sklearn.cluster import MiniBatchKMeans
+from sklearn.cluster import KMeans, MiniBatchKMeans
 
 def calculate_undersampling_targets(y, reduction_level):
     """Calculate how many per-class samples we need to keep to hit a target dataset size.
@@ -118,7 +118,7 @@ def sample_cluster_centroids(x_train_transformed, y_train_labels, reduction_leve
     if targets is None:
         return None, None, None
 
-    km_estimator = MiniBatchKMeans(n_init=1, random_state=random_state, batch_size=4096)
+    km_estimator = MiniBatchKMeans(n_init=1, random_state=random_state, batch_size=32768)
     undersampler = ClusterCentroids(sampling_strategy=targets, estimator=km_estimator, random_state=random_state)
     x_undersampled, y_undersampled_array = undersampler.fit_resample(x_train_transformed, y_train_labels)
 

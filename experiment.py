@@ -134,7 +134,7 @@ for sampler_name, sampler_function in samplers:
                             break
                     
                     # XGBoost breaks with string labels. thus, numeric encoding:
-                    if classifier_name == "XGBoost":
+                    if classifier_name == "XGBoost" or classifier_name == "MLP":
                         y_train_fit = label_encoder.transform(y_train_sampled)
                     else:
                         y_train_fit = y_train_sampled
@@ -149,7 +149,7 @@ for sampler_name, sampler_function in samplers:
 
                     inference_time = time.time() - start
 
-                    if classifier_name == "XGBoost":
+                    if classifier_name == "XGBoost" or classifier_name == "MLP":
                         y_test_predictions = label_encoder.inverse_transform(y_test_predictions)
 
                     # give me all the metrics
