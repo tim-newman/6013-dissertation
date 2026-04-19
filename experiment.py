@@ -18,7 +18,7 @@ parser.add_argument("--classifier", "-c",
                     nargs="+",
                     default=None)
 parser.add_argument("--sampler", "-s",
-                    choices=["Random", "ClusterCentroids", "NearMiss", "Density"],
+                    choices=["Random", "ClusterCentroids", "NearMiss1", "NearMiss2", "NearMiss3", "Density"],
                     nargs="+",
                     default=None)
 parser.add_argument("--dataset", "-d",
@@ -153,7 +153,7 @@ for sampler_name, sampler_function in samplers:
                         y_test_predictions = label_encoder.inverse_transform(y_test_predictions)
 
                     # give me all the metrics
-                    f1 = f1_score(y_test_labels, y_test_predictions, average="macro", zero_division="warn")  #better for debugging than silent fails at this stage
+                    f1 = f1_score(y_test_labels, y_test_predictions, average="macro", zero_division=0)
                     weighted_f1 = f1_score(y_test_labels, y_test_predictions, average="weighted", zero_division=0)
                     accuracy = accuracy_score(y_test_labels, y_test_predictions)
                     balanced_accuracy = balanced_accuracy_score(y_test_labels, y_test_predictions)

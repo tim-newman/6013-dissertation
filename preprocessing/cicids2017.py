@@ -14,6 +14,7 @@ IDENTIFIER_COLUMNS_TO_DROP = [
     "Src IP",
     "Dst IP",
     "Src Port",
+    "Dst Port",
     "Timestamp"
 ]
 

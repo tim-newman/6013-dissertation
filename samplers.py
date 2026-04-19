@@ -102,7 +102,7 @@ def sample_random(x_transformed, y, reduction_level, random_state): # TODO lot o
 
     undersampler = RandomUnderSampler(
         sampling_strategy=targets,
-        random_state=random_state,
+        random_state=random_state
     )
     x_undersampled, y_undersampled_array = undersampler.fit_resample(x_transformed, y)
 
@@ -128,16 +128,53 @@ def sample_cluster_centroids(x_train_transformed, y_train_labels, reduction_leve
     return x_undersampled, y_undersampled, actual_reduction
 
 
-def sample_nearmiss(x_train_transformed, y_train_labels, reduction_level, random_state):
+def sample_nearmiss1(x_train_transformed, y_train_labels, reduction_level, random_state):
     """imbalanced-learn NearMiss-1"""
     targets = calculate_undersampling_targets(y_train_labels, reduction_level)
     if targets is None:
         return None, None, None
 
-    undersampler = NearMiss(sampling_strategy=targets, n_jobs=-1)  # TODO does this allow for a fair comparison?
+    undersampler = NearMiss(sampling_strategy=targets, n_jobs=-1)
     x_undersampled, y_undersampled_array = undersampler.fit_resample(x_train_transformed, y_train_labels)
 
     y_undersampled = pd.Series(y_undersampled_array)
+    actual_reduction = len(y_undersampled) / len(y_train_labels)
+
+    return x_undersampled, y_undersampled, actual_reduction
+
+def sample_nearmiss2(x_train_transformed, y_train_labels, reduction_level, random_state):
+    """imbalanced-learn NearMiss-2"""
+    targets = calculate_undersampling_targets(y_train_labels, reduction_level)
+    if targets is None:
+        return None, None, None
+
+    undersampler = NearMiss(sampling_strategy=targets, n_jobs=-1, version=2)
+    x_undersampled, y_undersampled_array = undersampler.fit_resample(x_train_transformed, y_train_labels)
+
+    y_undersampled = pd.Series(y_undersampled_array)
+    actual_reduction = len(y_undersampled) / len(y_train_labels)
+
+    return x_undersampled, y_undersampled, actual_reduction
+
+def sample_nearmiss3(x_train_transformed, y_train_labels, reduction_level, random_state):
+    """imbalanced-learn NearMiss-3"""
+    targets = calculate_undersampling_targets(y_train_labels, reduction_level)
+    if targets is None:
+        return None, None, None
+
+    undersampler = NearMiss(sampling_strategy=targets, n_jobs=-1, version=3)
+    x_undersampled, y_undersampled_array = undersampler.fit_resample(x_train_transformed, y_train_labels)
+
+    y_undersampled = pd.Series(y_undersampled_array)
+
+    # bug for imblearn nearmiss-3 is reported that suggests it under-delivers sometimes when given sample_strategy dict?
+    # check for it:
+    delivered = dict(y_undersampled.value_counts())
+    for label, target_count in targets.items():
+        delivered_label = delivered.get(label, 0)
+        if delivered_label < target_count:
+            print(f"    NEARMISS UNDERDELIVERED {label}; TARGET {target_count} BUT DELIVERED {delivered_label}")
+
     actual_reduction = len(y_undersampled) / len(y_train_labels)
 
     return x_undersampled, y_undersampled, actual_reduction
@@ -146,5 +183,7 @@ def sample_nearmiss(x_train_transformed, y_train_labels, reduction_level, random
 SAMPLER_LIST = [
     ("Random", sample_random),
     ("ClusterCentroids", sample_cluster_centroids),
-    ("NearMiss", sample_nearmiss)
+    ("NearMiss1", sample_nearmiss1),
+    ("NearMiss2", sample_nearmiss2),
+    ("NearMiss3", sample_nearmiss3)
 ]
